@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "533310859784",
+    "project_id": "flutter-camera-ryonn",
+    "storage_bucket": "flutter-camera-ryonn.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:533310859784:android:9d4ca24618d3496a663fbd",
+        "android_client_info": {
+          "package_name": "tokyo.nn.flutter_camera"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBH7w28MI_j1no1HAnPnDqIS0A0cZkuYro"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

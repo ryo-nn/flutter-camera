@@ -1,0 +1,76 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // プラン状態ドキュメント(billing担当定義: users/{uid}/billing/state)を参照し、
+    // 有効なProプラン(トライアル含む)かを読み取り時に評価する(リテンション追補の
+    // 共通プラン有効判定)。let束縛により firestore.get は1回=参照1ドキュメント
+    // (cross-service Rulesの上限2件の制約内。出典:
+    // https://firebase.google.com/docs/storage/security/rules-conditions)
+    function hasActiveProPlan() {
+      let billing = firestore.get(
+        /databases/(default)/documents/users/$(request.auth.uid)/billing/state
+      ).data;
+      return billing.plan == 'pro'
+        && (billing.planExpiresAt == null
+            || request.time < billing.planExpiresAt);
+    }
+
+    // 運営提供のフレーム/スタンプ素材(通常): 認証済みユーザーは読み取りのみ
+    // ※ assets/premium/ 配下(3階層)は本ブロックにマッチしない
+    match /assets/{assetType}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if false; // 投入は運営(Admin SDK / コンソール)のみ
+    }
+
+    // プレミアム素材(リテンション追補): 有効なProプラン(トライアル含む=plan 'pro')
+    // のユーザーのみ読み取り可
+    match /assets/premium/{assetType}/{fileName} {
+      allow read: if isSignedIn() && hasActiveProPlan();
+      allow write: if false; // 投入は運営(Admin SDK / コンソール)のみ
+    }
+
+    // 加工済み投稿画像/動画: 本人がアップロード、以後は不変
+    // 動画対応追補: contentType別に上限を分ける。Storage側は両ターゲット(IG 300MB /
+    // X 512MB)のうち大きい方(512MB)を上限とし、ターゲット別のより厳しい上限
+    // (IGの300MB等)はCloud Functions側のサーバー検証(mediaValidation)で担保する。
+    // MOV(video/quicktime)対応追補: iPhoneのフォトライブラリから取り込んだ動画は
+    // 通常.mov(QuickTimeコンテナ)であり、クライアントは拡張子から実contentTypeを
+    // 申告する(コードレビュー指摘「MOV動画のcontentType不整合」対応)。Instagramは
+    // MOV/MP4いずれも受理するため、Storage側もvideo/mp4と同じ上限でvideo/quicktimeを
+    // 許可する(XターゲットのcontentTypeゲーティングはクライアント側`VideoTargetRules`+
+    // サーバー側mediaValidationで別途行う)。
+    match /users/{uid}/postImages/{fileName} {
+      allow read: if isOwner(uid);
+      allow create: if isOwner(uid)
+        && (
+          (request.resource.contentType == 'image/jpeg' // IGはJPEGのみ対応
+            && request.resource.size < 10 * 1024 * 1024)
+          || ((request.resource.contentType == 'video/mp4' // 動画投稿(Reels/X動画)用
+                || request.resource.contentType == 'video/quicktime') // MOV(iPhone標準コンテナ)用
+            && request.resource.size < 512 * 1024 * 1024)
+        );
+      allow update, delete: if false; // 削除はCloud Functions/運用のみ
+    }
+
+    // Instagram用一時公開画像: クライアントアクセス全面禁止
+    // (Cloud Functionsが署名付きURLを発行して公開する)
+    match /igTemp/{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    // デフォルト拒否
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFB6D5"/>
+      <stop offset="1" stop-color="#9D6CFF"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <!-- パターンカルーセル(3つの円=プリセット) -->
+  <circle cx="342" cy="560" r="170" fill="#FFFFFF" opacity="0.55"/>
+  <circle cx="512" cy="470" r="190" fill="#FFFFFF" opacity="0.75"/>
+  <circle cx="688" cy="560" r="170" fill="#FFFFFF" opacity="0.95"/>
+  <!-- 中央円にスパーク -->
+  <path d="M512 380 l30 72 72 30 -72 30 -30 72 -30 -72 -72 -30 72 -30 z" fill="#9D6CFF"/>
+</svg>

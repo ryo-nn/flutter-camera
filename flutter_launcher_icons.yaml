@@ -1,0 +1,11 @@
+# アプリアイコン生成設定(暫定: A案「シャッター×スパーク」を適用。
+# 差し替えは docs/brand/icon-proposals/ の画像を変えて
+# `dart run flutter_launcher_icons` を再実行するだけでよい)
+flutter_launcher_icons:
+  image_path: "docs/brand/icon-proposals/icon_a.png"
+  ios: true
+  remove_alpha_ios: true
+  android: true
+  # Androidアダプティブアイコン: 背景=A案グラデーションの中間色、前景=セーフゾーン調整版
+  adaptive_icon_background: "#9B59F6"
+  adaptive_icon_foreground: "docs/brand/icon-proposals/icon_a_fg.png"

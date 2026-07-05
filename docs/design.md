@@ -15,7 +15,9 @@
 7. X投稿枠・クレジット制御設計
 8. リテンション機能設計(プリセット/配信/ダッシュボード)
 9. 追補による既存章への変更点
-10. 未解決事項
+10. メディア取り込み・動画対応(追補設計)
+11. リリース準備追補(アカウント管理・乱用対策配線・App Check)
+12. 未解決事項
 
 ## アプリアーキテクチャ設計
 
@@ -4047,6 +4049,508 @@ Pro判定の参照は、billing担当定義の `billingStateProvider`(`users/{ui
 - firestore.indexes.json の変更なし(ダッシュボード当月クエリは既存の posts(userId ASC, createdAt DESC)複合インデックスで充足)を明記
 - iOS(Push Notifications capability・Background Modes・APNsキー登録)/ Android(POST_NOTIFICATIONS 宣言)のプラットフォーム設定をプラットフォーム設定節に追記
 
+## メディア取り込み・動画対応(追補設計)
+
+### 対象範囲と前提
+
+- 要件定義書§3.1「フォトライブラリからの取り込み」「アプリ内の動画撮影」「動画投稿」に対応する追補設計である。既存の撮影・自動加工パイプライン(カメラ・自動加工パイプライン設計セクション)、SNS連携バックエンド設計、データモデル設計は変更を最小限にとどめ、本章では差分のみを定義する。
+- 動画は**無加工のまま**投稿する。フィルター焼き込み・フレーム/スタンプ合成等の動画加工、ストーリーズへの投稿、動画へのパターン適用、カルーセル投稿はv1のスコープ外とする(要件§3.1)。
+- X投稿枠・クレジット消費、Instagramフェアユース上限の消費規則は画像・動画で区別しない(「動画1件=1回」。X投稿枠・クレジット制御設計セクションの既存トランザクションをそのまま適用する)。
+
+### S-04 ホーム/撮影画面の改訂(写真/動画モード切替)
+
+既存のS-04(画面設計・UIフローセクション参照)に対する追補。主要UI要素・状態・画面内アクション・遷移先の差分のみを記載する。
+
+#### 追加する主要UI要素
+
+| 追加要素 | 内容 |
+|---|---|
+| 写真/動画モード切替 | シャッターボタン上部に横並びセグメントコントロール「写真」「動画」(既定=写真)。動画モード選択中はパターンカルーセルを操作不可(タップ無効・半透明化)にする(動画は無加工投稿のため、パターン適用UIとしての意味を持たせない) |
+| ライブラリ取り込みボタン | 左下(カメラ切替ボタンと対称の位置)にギャラリーアイコンを追加。タップで`ImagePicker().pickMedia()`(写真・動画を同一ピッカーで選択できる公式API。出典: [image_picker](https://pub.dev/packages/image_picker))を起動する |
+| シャッターボタンの動的化 | 写真モード: 既存どおりタップで即撮影。動画モード: タップで録画開始(ボタンが赤色■表示に変化+経過秒数を表示)、再タップで録画終了。140秒到達時は自動終了する |
+
+#### 追加する状態
+
+| 状態 | 表示ルール |
+|---|---|
+| recording | 録画中はシャッターボタンを赤色■に変化させ、経過秒数/残り秒数を表示する。140秒到達で自動的に録画を終了しS-05vへ遷移する |
+| importing | ライブラリからの写真・動画の読み込み待ちはモーダルスピナーを表示する |
+| mic-permission-denied | 動画モードのみ。マイク権限が許可されていない場合、シャッターボタンを無効化し「マイクへのアクセスが許可されていません。動画撮影には許可が必要です。」+「設定を開く」を表示する(既存のpermission-denied状態と同一のパターンを踏襲) |
+
+#### 追加する画面内アクション
+
+- 写真/動画モード切替(タップ)
+- ライブラリから写真/動画を選択(`image_picker`)
+- 動画撮影(タップで開始/タップで終了、140秒上限で自動終了)
+
+#### 追加する遷移先
+
+- 動画モードでの撮影成功、またはライブラリから動画を選択 → S-05v(動画プレビュー)
+- ライブラリから写真を選択 → 既存のS-05(加工プレビュー)。撮影結果と同様にパターン選択・適用を行う
+- ライブラリ取り込みの写真は**ミラー反転しない**(既存仕様はフロントカメラ撮影時のみのミラー処理であり、取り込み画像には適用しない)
+
+### S-05v 動画プレビュー画面(新設)
+
+既存のS-05(加工プレビュー画面)と同一の表形式で定義する。要件の画面構成上はS-05と同一ステップ(撮影・取り込み後の確認)に属する画面であり、design.mdの画面ID体系ではS-05aと同様、親画面フローに付随する画面として扱う。
+
+| 項目 | 内容 |
+|---|---|
+| 目的 | 撮影・取り込みした動画の再生確認。動画は無加工のためパターン適用・微調整は行わず、確認のみを行う |
+| 主要UI要素 | ①`video_player`(公式パッケージ。出典: [video_player](https://pub.dev/packages/video_player))による動画プレビュー(画面中央、タップで再生/一時停止切替)/②シークバー+経過時間/合計時間表示/③「撮り直す」テキストボタン(S-04で直接撮影した場合)または「選び直す」テキストボタン(ライブラリ取り込みの場合)/④「次へ」プライマリボタン |
+| 状態 | loading: 動画初期化(`VideoPlayerController.initialize()`)中はスピナー / playing: 再生中 / paused: 一時停止中(初期表示は自動再生せずpaused。ユーザーのタップで再生開始) / error: 動画の読み込みに失敗した場合「動画を読み込めませんでした。」+「撮り直す」「選び直す」(遷移元に応じて文言を出し分け) |
+| 画面内アクション | 再生/一時停止切替/シーク/撮り直す・選び直す/次へ |
+| 遷移先 | 撮り直す・選び直す・戻る → 破棄確認ダイアログ「動画を破棄しますか?」→ S-04 / 次へ → S-07(動画をそのままS-07投稿画面へ引き継ぐ。S-05・S-05aは経由しない) |
+
+※加工パイプラインとの対応: 既存のS-05(軽量適用→微調整時のみpro_image_editor起動→「次へ」で本適用JPEG生成の3段構成)は写真専用のフローであり、動画はこのパイプラインを一切通らない。動画の長さ・ファイルサイズに対するターゲット別バリデーションはS-05vでは行わず、S-07(下記)で行う。
+
+### S-07 SNS投稿画面の動画対応
+
+既存のS-07(SNS投稿画面)は写真投稿を前提に定義されている。動画投稿時は以下を追加する。
+
+#### ターゲット別バリデーション
+
+| 対象 | 許容範囲 | 超過時の挙動 |
+|---|---|---|
+| Instagram | 長さ3秒〜15分 かつ ファイルサイズ300MB以下 | Instagram行のチェックボックスを選択不可にし、理由「動画の長さ/サイズがInstagramの上限を超えています」を表示する |
+| X | 長さ0.5〜140秒 かつ ファイルサイズ512MB以下 | X行のチェックボックスを選択不可にし、理由「動画の長さ/サイズがXの上限を超えています」を表示する |
+
+バリデーションは**ターゲットごとに独立して判定**する(キャプション文字数バリデーション(既存仕様)が「両方選択時は厳しい方の残数を表示」する扱いなのとは異なる点に注意)。長さ・サイズはS-05vで取得した動画メタデータ(`durationSec` / `fileSizeBytes`)をクライアント側で比較して判定する。
+
+#### 表示・進捗の追加
+
+- 動画投稿かつInstagramが選択可能な場合、投稿先リスト直下に注記「Instagramへはリールとして投稿されます」を表示する
+- キャプション入力欄・文字数カウンタ(Instagram 2,200文字・ハッシュタグ30個・@タグ20個/X加重280文字)は既存仕様のまま変更しない(画像・動画で共通)
+- 投稿実行中(posting状態)の進捗行は、動画投稿時「Instagram: 動画アップロード中→投稿中→完了・失敗」と読み替える(文言の差し替えのみで、状態遷移の構造(既存の`posts.targets.<provider>.status`)は写真と共通)
+
+### クライアントフロー(取り込み・撮影・プレビュー・投稿)
+
+#### フォトライブラリからの取り込み
+
+- S-04のライブラリ取り込みボタンから`ImagePicker().pickMedia()`を起動する。iOS 14+は内部で`PHPickerViewController`が使われるため、`Info.plist`の`NSPhotoLibraryUsageDescription`が必須(App Storeポリシー)。Androidは追加設定不要
+- 選択結果(`XFile`)のMIMEタイプ/拡張子で写真・動画を判別し、写真は既存のS-05(加工プレビュー)へ、動画はS-05v(動画プレビュー)へ遷移する
+
+#### アプリ内動画撮影
+
+- S-04の動画モードは既存の`camera`パッケージ(要件§6で選定済み)の録画APIを使用し、`enableAudio: true`で初期化する(録画時のみマイクを使用。既存の写真撮影は`enableAudio`を必要としないため差分として明記する)
+- 解像度は`ResolutionPreset.hd`(720p)を指定する
+- 録画時間はクライアント側で計測し、140秒到達時に自動的に録画を終了してS-05vへ遷移する(X投稿の秒数上限0.5〜140秒に整合させた値であり、Instagramリールの15分上限より厳しい方を採用している)
+
+#### プレビューと投稿への引き継ぎ
+
+```mermaid
+flowchart TD
+    S04[S-04 ホーム/撮影] -->|写真モードで撮影| S05[S-05 加工プレビュー]
+    S04 -->|ライブラリから写真を選択| S05
+    S04 -->|動画モードで撮影 または ライブラリから動画を選択| S05v[S-05v 動画プレビュー]
+    S05 -->|次へ 本適用JPEG生成| S07[S-07 SNS投稿]
+    S05v -->|次へ 無加工のまま引き継ぎ| S07
+```
+
+- 動画はS-05(加工プレビュー)・S-05a(微調整エディタ)を一切経由しない。パターン適用・pro_image_editorの起動対象は写真のみ(既存のimagingセクションの加工パイプラインは動画に対して何も行わない)
+- `video_player`の`VideoPlayerController.initialize()`完了後に取得できる`Duration`を`durationSec`として使用する。ファイルサイズは`XFile`/`File`のサイズから取得し、S-07のターゲット別バリデーションに渡す
+
+### バックエンド設計(`snsPublishPost` の動画対応)
+
+#### 関数構成の変更
+
+- `snsPublishPost`の**メモリを512MiBから1GiBへ引き上げる**(`timeoutSeconds: 540`は変更しない)。動画バイナリをStorageから読み出しXのchunked uploadへ転送する処理でのメモリ使用量増加に対応するため
+- 入力を拡張する: 既存の`{ postId, imagePath, caption, targets, force? }`に対し、`mediaType: 'image' | 'video'`(必須)、`videoPath?: string`(`mediaType == 'video'`時必須。`users/{uid}/postVideos/{videoId}.mp4`形式)、`durationSec?: number`、`fileSizeBytes?: number`を追加する。`mediaType == 'image'`時は既存どおり`imagePath`を使用し、`videoPath`系は無視する
+- クォータ消費・フェアユース予約(X日次/月次、Instagramフェアユース)は**画像・動画で区別しない**(要件どおり「動画1件=1回」)。「コスト制御」節・「Instagramフェアユース上限(スロットル)」節の既存トランザクション実装をそのまま流用し、`mediaType`による分岐は設けない
+
+#### Instagram: リール(動画)投稿フロー
+
+```
+(1) 事前チェック: 既存の content_publishing_limit 確認 + Instagramフェアユース予約(既存節と同一)
+
+(2) 恒久動画オブジェクト(users/{uid}/postVideos/{videoId}.mp4)を
+    igTemp/{uid}/{postId}.mp4 へコピー + V4署名付きURL(有効期限1時間)発行
+
+(3) コンテナ作成
+POST https://graph.instagram.com/v25.0/<IG_USER_ID>/media
+  media_type=REELS, video_url=<署名付きURL>, caption=<キャプション>
+→ { id: <IG_CONTAINER_ID> }
+
+(4) ステータス確認
+GET https://graph.instagram.com/v25.0/<IG_CONTAINER_ID>?fields=status_code
+→ FINISHED / IN_PROGRESS / ERROR / EXPIRED / PUBLISHED
+
+(5) 公開
+POST https://graph.instagram.com/v25.0/<IG_USER_ID>/media_publish
+  creation_id=<IG_CONTAINER_ID>
+→ { id: <IG_MEDIA_ID> } → posts/{postId}.targets.instagram.publishedId に保存
+
+(6) igTemp/{uid}/{postId}.mp4 を削除(finallyブロック。既存の「一時公開画像のライフサイクル」節と同一の多層防御を動画にも適用する。GCSライフサイクルルールの対象prefixは既存の igTemp/ のまま変更不要)
+```
+
+出典: [Instagram Content Publishing](https://developers.facebook.com/docs/instagram-platform/content-publishing/) / [IG User Media Reference](https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/ig-user/media)(動画は`media_type=REELS`のみ。VIDEOの記載はなくREELS/CAROUSEL/STORIESのみ)。
+
+- **ポーリング間隔の変更(動画専用)**: 画像は「5秒間隔で最大60秒→未完なら60秒間隔で最大5分」の階層ポーリングだが、動画は**10秒間隔・最大300秒(5分)の単一間隔**とする。動画のエンコード処理は画像より時間を要する一方、`snsPublishPost`の`timeoutSeconds: 540`内でX側処理・後処理まで完了させる必要があるため、公式推奨の「1分間隔」より短い間隔で早期にFINISHEDを検知し、待ち時間の裾(テール)を短縮して実行時間予算に収める。既存の`IG_CONTAINER_TIMEOUT`/`ig_container_timeout`をそのまま流用し、新しいエラーコードは追加しない
+- **300秒超過時の扱い**: `media_publish`を呼ぶ前の打ち切りのため、「リトライ方針」表の「メディアアップロード / コンテナ作成の5xx・ネットワークエラー」と同じ**送信前失敗**に分類する。Instagramフェアユース予約は「Instagramフェアユース上限(スロットル)」節の既存の返還規則(送信前失敗は補償トランザクションで減算、送信後・結果不明は返還しない。Xと同一規則)にそのまま従い、予約分を返還する。**新しい返還ルールは設けない**
+
+#### X: チャンクアップロードによる動画投稿フロー
+
+```
+(1) INIT
+POST https://api.x.com/2/media/upload
+  command=INIT, total_bytes=<fileSizeBytes>, media_type=video/mp4, media_category=tweet_video
+→ { data: { id: <MEDIA_ID>, expires_after_secs } }
+
+(2) APPEND(繰り返し)
+恒久動画オブジェクト(users/{uid}/postVideos/{videoId}.mp4)をAdmin SDKでStorageから
+ストリーム読み出しし、5MB単位のセグメントに分割して順次送信:
+POST https://api.x.com/2/media/upload
+  command=APPEND, media_id=<MEDIA_ID>, segment_index=<0,1,2,...>, media=<5MBバイナリ>
+
+(3) FINALIZE
+POST https://api.x.com/2/media/upload
+  command=FINALIZE, media_id=<MEDIA_ID>
+→ { data: { id, processing_info?: { state: 'pending', check_after_secs } } }
+
+(4) STATUS(processing_infoが返った場合のみ)
+GET https://api.x.com/2/media/upload?command=STATUS&media_id=<MEDIA_ID>
+→ state: pending → in_progress → succeeded / failed(check_after_secs間隔でポーリング)
+
+(5) ポスト作成(既存フローと共通)
+POST https://api.x.com/2/tweets
+  { text: <キャプション>, media: { media_ids: [<MEDIA_ID>] } }
+→ 201 { data: { id, text } } → posts/{postId}.targets.x.publishedId に保存
+```
+
+出典: [X Media Upload (Chunked)](https://docs.x.com/x-api/media/quickstart/media-upload-chunked) / [X Media Best Practices](https://docs.x.com/x-api/media/quickstart/best-practices)。
+
+- Xは画像と同様に**公開URL不要**(バイナリを直接アップロード)。一時公開の仕組み(`igTemp/`)は動画でもInstagram専用のまま変更しない
+- INIT〜STATUSまでの失敗はすべて`POST /2/tweets`**送信前**のため、既存の「リトライ方針」表の分類(5xx・ネットワークエラーは関数内で1回だけ即時再試行、それでも失敗なら`failed`+`retryable`)をそのまま適用する。クォータ(日次/月次カウンタ)の返還規則も既存どおり「送信前失敗は補償トランザクションで減算」に従う
+
+#### 冪等性・部分失敗・onCallエラーコード
+
+- 冪等キー(`postId` / `videoId`)の扱い、`processing`へのCAS遷移、`Promise.allSettled`による独立実行、部分失敗時のUI表示は既存の「一括投稿の実行設計」節をそのまま踏襲し、動画専用の変更は行わない
+- onCallエラーコード一覧(既存表)にも新規コードを追加しない。動画特有の失敗はすべて既存の`ig_container_timeout` / `ig_container_error` / `x_quota_exceeded`等の既存コードにマッピングする
+
+### データモデル・Security Rules変更点
+
+#### `posts/{postId}` へのフィールド追加
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `mediaType` | string | `'image'` \| `'video'`。要件§8のPost概略では暗黙に画像のみを想定していたが、既存の投稿(画像)は`'image'`として扱う |
+| `videoPath` | string \| null | 動画のStorageパス(`users/{uid}/postVideos/{videoId}.mp4`)。`mediaType == 'video'`のときのみ値を持つ |
+| `durationSec` | number \| null | 動画の再生時間(秒)。`mediaType == 'video'`のときのみ |
+| `fileSizeBytes` | number \| null | 動画のファイルサイズ(バイト)。`mediaType == 'video'`のときのみ |
+
+既存の`imagePath`(Freezed定義では必須)は`mediaType == 'image'`のときのみ意味を持つフィールドとなる。`imagePath`をnullable化するか型を維持するかはFreezedモデルの`required`制約の見直しを伴うため、data担当との最終合意事項として未解決事項に記載する。
+
+Freezed `Post`モデル(`post.dart`)への追加。既存フィールドはデータモデル・ストレージ・セキュリティルール設計セクションの定義を参照:
+
+```dart
+enum PostMediaType {
+  @JsonValue('image')
+  image,
+  @JsonValue('video')
+  video,
+}
+
+// Post に以下を追加
+required PostMediaType mediaType,
+String? videoPath,
+double? durationSec,
+int? fileSizeBytes,
+```
+
+#### Firebase Storage 構成の追加
+
+| パス | 用途 | 書き込み | 読み取り |
+|---|---|---|---|
+| `users/{uid}/postVideos/{videoId}.mp4` | 加工しない投稿動画本体(既存の`users/{uid}/postImages/{imageId}.jpg`と同方式)。`videoId`はクライアント生成のUUID v4 | 本人(createのみ・`video/mp4`・512MB未満) | 本人 |
+| `igTemp/{uid}/{postId}.mp4` | Instagram用一時公開動画(Cloud Functionsが`postVideos`からコピー) | Cloud Functionsのみ | クライアント禁止。署名付きURL経由のみ(既存の`igTemp/{allPaths=**}`ルールでカバー済み。追加のルール定義は不要) |
+
+`storage.rules`の追加(既存の`users/{uid}/postImages/{fileName}`ブロックと並列に新設):
+
+```text
+// 加工しない投稿動画: 本人がアップロード、以後は不変
+match /users/{uid}/postVideos/{fileName} {
+  allow read: if isOwner(uid);
+  allow create: if isOwner(uid)
+    && request.resource.contentType == 'video/mp4'
+    && request.resource.size < 512 * 1024 * 1024; // Xの上限(512MB)に合わせる
+  allow update, delete: if false; // 削除はCloud Functions/運用のみ
+}
+```
+
+`igTemp/{allPaths=**}`は既存ルールが拡張子を問わず全面拒否(`allow read, write: if false;`)のため、動画(`.mp4`)を配置しても追加のルール変更は不要。
+
+#### Firestore Security Rules
+
+`posts`ドキュメントの作成・更新は既存どおりCloud Functions(Admin SDK)のみのため、`mediaType` / `videoPath` / `durationSec` / `fileSizeBytes`を追加してもクライアント向けの`firestore.rules`変更は不要(既存の「クライアント書込全面禁止」の対象範囲内)。
+
+### 制限値と検証の一覧表
+
+| 項目 | Instagram(リール) | X |
+|---|---|---|
+| 長さ | 3秒〜15分 | 0.5〜140秒 |
+| ファイルサイズ上限 | 300MB | 512MB |
+| コンテナ/コーデック | MOV/MP4(moov atom先頭・edit listなし)、映像HEVC/H.264、音声AAC(最大48kHz、1〜2ch) | MP4(公式サンプルで確認済み。MOVでの受理可否は未確認。要件§9参照)、映像H.264 High Profile推奨、音声AAC LC |
+| Storage申告contentType | `video/mp4` / `video/quicktime`(拡張子から判定。いずれも受理) | `video/mp4`のみ(`video/quicktime`はS-07でXターゲット選択不可+理由「Xへの投稿はMP4形式の動画のみ対応しています」を表示) |
+| フレームレート | 23〜60FPS | 60FPS以下 |
+| アスペクト比 | 0.01:1〜10:1(推奨9:16) | 1:3〜3:1 |
+| 解像度 | 規定なし(アスペクト比条件のみ) | 32x32〜1280x1024 |
+| アプリの録画設定 | `ResolutionPreset.hd`(720p)で撮影 | 同左(Xの解像度上限との関係は未解決事項を参照) |
+| S-07でのバリデーション | 超過時はInstagram行を選択不可+理由表示 | 超過時、またはcontentTypeが`video/quicktime`の場合はX行を選択不可+理由表示 |
+| 出典 | [Instagram Content Publishing](https://developers.facebook.com/docs/instagram-platform/content-publishing/) / [IG User Media Reference](https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/ig-user/media) | [X Media Upload (Chunked)](https://docs.x.com/x-api/media/quickstart/media-upload-chunked) / [X Media Best Practices](https://docs.x.com/x-api/media/quickstart/best-practices) |
+
+v1対象外(要件§3.1と同一。再掲): 動画への加工(フィルター焼き込み・フレーム/スタンプ合成)、ストーリーズ投稿、カルーセル投稿。
+
+※MOV/MP4のcontentType不整合修正(コードレビュー指摘対応): クライアントは常に`video/mp4`を
+申告していたが、フォトライブラリ取り込み動画(iPhoneは通常`.mov`=QuickTimeコンテナ)やアプリ内
+撮影動画(`camera`パッケージの出力拡張子に依存)の実コンテナ形式と食い違う場合があった。
+`PostMedia.video.contentType`をファイル拡張子判定(`.mov`→`video/quicktime`、それ以外→
+`video/mp4`)で保持し、アップロード時のcontentType申告・storage.rules・Cloud Functions側の
+`mediaValidation`(ターゲット別許可contentType)に一貫して反映する。
+
+## リリース準備追補(アカウント管理・乱用対策配線・App Check)
+
+### 対象範囲と位置づけ
+
+本章は、これまでの各章で設計方針を確定していた機能のうち、今回のリリース準備で実装が完了したクライアント/バックエンドの配線を実装事実に基づいて記録する追補である。既存章の記述は変更せず、本章から既存章の該当節へ参照を張る形で記載する。対象は次の8点。
+
+1. S-09「アカウント」セクション(新設): 電話番号認証・サインアウト・アカウント削除
+2. アカウント削除(App Store審査5.1.1(v)対応): クライアント再認証フロー + Cloud Functions `accountDelete`
+3. 電話番号認証(SMS認証)のクライアント実装: 第7章「乱用対策」節の実装
+4. deviceId/platform配線: 第7章「デバイス単位の無料枠管理」節の実装
+5. App Checkクライアント初期化: 第7章「App Check の Functions 側 enforce」節の実装
+6. プレミアムパターンのロックUI: 第8章「プレミアムパターンのアクセス制御」第1層の実装
+7. S-08「よく使うパターン」タイル→S-04選択反映: 第8章「成果ダッシュボード(S-08改訂)」の実装
+8. AndroidManifest権限追加・エディタUI文言の日本語化
+
+関連する既存章: 第2章(画面設計・UIフロー)S-09仕様、第5章(SNS連携バックエンド設計)関数一覧・onCallエラーコード一覧、第7章(X投稿枠・クレジット制御設計)乱用対策節・投稿失敗時の返還ポリシー節、第8章(リテンション機能設計)プレミアムパターンのアクセス制御節・成果ダッシュボード節、第1章(アプリアーキテクチャ設計)ディレクトリ構造・プロバイダー設計・pubspec.yaml。
+
+---
+
+### S-09「アカウント」セクション(画面設計・UIフロー章 S-09への追補)
+
+`lib/src/features/sns_accounts/presentation/sns_accounts_screen.dart` の既存Instagram/Xセクションの下に「アカウント」セクションを追加する(実装は `_AccountSection`)。
+
+| 項目 | 内容 |
+|---|---|
+| 主要UI要素 | ①電話番号認証行(状態表示+タップで認証画面へ) ②「サインアウト」行 ③「アカウントを削除」行(赤字) |
+| 状態 | 電話番号認証行: 認証済み=マスク電話番号(例`090****5678`)+チェックアイコン(タップ不可)/ 未認証=「未認証 — 無料プランでのX投稿に必要です」+`chevron_right`(タップ可) |
+| 画面内アクション | サインアウト・アカウント削除ともに破壊的操作の確認ダイアログ(既存共通`showConfirmDialog`、`isDestructive: true`)を必ず挟む(「共通UI状態の設計方針」節の破壊的操作の原則に準拠) |
+| 遷移先 | 電話番号認証行タップ → 電話番号認証画面(`Navigator.push`。GoRouterルートは新設しない。S-09がnavigationを管轄するため) |
+
+#### 電話番号認証(SMS認証)
+
+第7章「無料X枠の解放条件: SMS認証」節のクライアント実装。`_PhoneVerificationTile` が `linkedPhoneNumberProvider`(`FirebaseAuth.currentUser?.phoneNumber` を返す。新規プロバイダー)を監視し表示を切り替える。電話番号のリンクは `users/{uid}` プロフィールを変更しないため `authStateChangesProvider` では検知できず、`PhoneVerificationScreen` から `Navigator.pop(true)` で戻った直後に呼び出し元が `ref.invalidate(linkedPhoneNumberProvider)` を実行して明示的に再取得する。
+
+`PhoneVerificationScreen`(`lib/src/features/auth/presentation/phone_verification_screen.dart`)のフロー:
+
+1. 電話番号入力(`AuthFieldValidators.japanPhoneNumber` でバリデーション)→「SMSを送信」→ `JapanPhoneNumberFormatter.toE164` で日本国内表記(先頭`0`、10〜11桁)をE.164(`+81...`)へ変換 → `AuthRepository.verifyPhoneNumber`(Firebase Auth公式 `verifyPhoneNumber`)
+2. `codeSent` コールバックでコード入力ステップへ遷移し、60秒の再送信クールダウンを開始する。再送信時は直前の `codeSent` で受け取った `forceResendingToken` を渡し重複送信防止をバイパスする(`verifyPhoneNumber` 公式仕様準拠)
+3. 自動検証完了(`verificationCompleted`)時は `linkWithCredential` → `getIdToken(true)`(強制リフレッシュ)を自動実行する
+4. 手動のコード入力→確認時も同様に `linkWithCredential`(現在ログイン中のFirebase Authアカウントへリンク)→ `getIdToken(true)`
+5. 成功画面表示→「閉じる」→ `Navigator.pop(true)`
+
+**IDトークンの強制リフレッシュ理由**: 第7章「サーバー側検証」節は `request.auth.token.phone_number`(IDトークンのカスタムクレーム)を参照して判定するため、リンク直後にクライアントがIDトークンをキャッシュしたままだと新しい電話番号クレームがサーバーに伝わらない。そのためリンク成功直後に必ず `getIdToken(true)` を呼ぶ(第7章「サーバー側検証」節「リンク直後はクライアント側でIDトークンの強制リフレッシュが必要な点をクライアント実装に明記する」の実装箇所)。
+
+エラー文言(`AuthException.code` 別、`_phoneErrorMessage`):
+
+| コード | UI文言 |
+|---|---|
+| `operation-not-allowed` / `quota-exceeded` | 「現在ご利用いただけません。時間をおいて再度お試しください。」(Firebaseコンソール側のPhone Auth未有効化・SMS従量課金枠超過等、RYOの運用設定待ちの状態を含む) |
+| `invalid-phone-number` | 「電話番号の形式が正しくありません。入力内容を確認してください。」 |
+| `invalid-verification-code` | 「認証コードが正しくありません。再度ご確認のうえ入力してください。」 |
+| `invalid-verification-id` / `session-expired` | 「認証コードの有効期限が切れました。最初からやり直してください。」 |
+| 上記以外(`credential-already-in-use` 等) | 既存 `ErrorMapper`(core/error/error_mapper.dart)の汎用文言にフォールバック |
+
+#### サインアウト
+
+確認ダイアログ(「サインアウトしますか?」)→ `AuthRepository.signOut()`(`FirebaseAuth.signOut()`)→ `authStateChanges()` がnullを流す → GoRouterのredirectが以後の画面遷移を担う(明示的な画面遷移コードをUI側に書かない。既存の認証ガード機構をそのまま利用)。
+
+#### アカウント削除(App Store審査5.1.1(v)対応)
+
+App Store Review Guideline 5.1.1(v)(アプリ内でアカウントを作成できる場合、アプリ内から削除も開始できること)への対応。
+
+**クライアントフロー**:
+
+1. 「アカウントを削除」タップ → 確認ダイアログ「アカウントを削除すると、投稿履歴・SNS連携情報を含むすべてのデータが完全に削除されます。この操作は取り消せません。本当に削除しますか?」(`isDestructive: true`)
+2. 承認後、本人確認ダイアログ(`account_deletion_dialog.dart` の `showAccountDeletionDialog`)を表示。パスワード再入力フォーム(`autofillHints: [AutofillHints.password]`)
+3. 送信: `AuthRepository.reauthenticateWithPassword`(`EmailAuthProvider.credential` + `User.reauthenticateWithCredential`。Firebase Authはアカウント削除に直近ログインを要求するため)→ 成功後 `AuthRepository.deleteAccount()`(Cloud Functions `accountDelete` をonCall呼び出し)
+4. `deleteAccount()` 内部で明示的に `signOut()` を実行する(サーバー側でFirebase Authユーザーは削除済みだが、クライアントの `FirebaseAuth` インスタンスは自動検知しないため)。これにより `authStateChanges()` がnullを流し、**サインアウトと同一のGoRouter redirect機構**が以後の画面遷移を担う(削除成功後の明示的な画面遷移コードは書かない)
+5. エラー(再認証失敗・削除失敗いずれも)はダイアログ内にインライン表示し、ダイアログを閉じずに再試行できる
+
+**サーバー側**(`functions/src/account/accountDelete.ts` + `functions/src/account/accountDeleteTargets.ts`): `onCall({ enforceAppCheck: true })`。`request.auth` 未設定は `unauthenticated`。regionは `index.ts` の `setGlobalOptions` で `asia-northeast1` 固定のため個別指定なし(既存onCall規約どおり)。引数なし(呼び出し元が再認証済みである前提)。
+
+削除対象一覧(`buildAccountDeleteTargets(uid)` が組み立てるパスと完全一致):
+
+| 削除対象 | 方式 | 備考 |
+|---|---|---|
+| `users/{uid}` + 全サブコレクション | `db.recursiveDelete()` | `billing/state`・`snsConnections/{provider}` 等を含む |
+| `patterns`(`ownerUid == uid`) | クエリ一致で全件削除 | 運営プリセット(`ownerType: 'preset'`、`ownerUid` なし)は等価クエリに一致せず対象外 |
+| `posts`(`userId == uid`) | クエリ一致で全件削除 | 投稿履歴 |
+| `postUsage`(`uid == uid`) | クエリ一致で全件削除 | X日次/月次・Instagram日次フェアユースの利用カウンタ全期間分(ドキュメントIDに期間キーを含み列挙できないため、永続化済みの `uid` フィールドで検索) |
+| `snsTokens/{uid}_instagram` / `snsTokens/{uid}_x` | 決定的パスへの直接 `delete()` | 存在しなければno-op |
+| `onboardingGrants/{uid}` | 決定的パスへの直接 `delete()` | 初回投稿グラント消費記録 |
+| `devices`(`freeOwnerUid == uid` に一致するドキュメント) | **削除せず** `freeOwnerUid: null` に更新するのみ | 乱用対策上の理由(次段落) |
+| Storage `users/{uid}/` プレフィックス | `bucket.deleteFiles({ prefix, force: true })` | 加工済み投稿画像等 |
+| Storage `igTemp/{uid}/` プレフィックス | 同上 | Instagram一時公開ファイル |
+| Firebase Authユーザー(`auth.deleteUser(uid)`) | 最後に実行 | 実行後は当該ユーザーの認証済みIDトークンが再発行できなくなり関数を再実行できなくなるため、固定順の最終ステップに置く |
+
+削除対象外として明示するもの:
+
+- `rcEvents/{eventId}`: RevenueCat Webhookの冪等化台帳。既存の90日TTL(Firestore TTLポリシー)で自動失効する設計のため対象外
+- `creditGrants/{store}_{transactionId}`: 購入クレジット付与/取消の二重処理防止台帳。取引ID・uid・金額相当の情報のみを保持し、氏名・連絡先等のプロフィール情報を含まないため、不正利用調査・決済突合・会計監査等の正当な事業目的での保持(Apple Guideline 5.1.1(v)が認める「法令順守・不正防止に必要なデータの保持」に相当)として対象外とする
+- RevenueCat側のサブスクリプション状態: Cloud Functionsからは一切操作できない(ストア側の管理のため)。ユーザーはOS標準のサブスク管理画面から解約する必要がある(`users/{uid}/billing/state` ドキュメント自体は `users/{uid}` のサブコレクションとして削除されるが、ストア側の課金契約には影響しない)
+
+**冪等性・処理順**: 各ステップは「存在すれば削除/更新、存在しなければ何もしない」設計のため、途中失敗後の再実行で必ず完走できる。処理順は「Firestore/Storageのデータ削除(`Promise.all` で並列実行)→ 最後にAuthユーザー削除」の固定順とする。Authユーザー削除を先に行うとこの関数を呼ぶための認証済みIDトークン自体が発行できなくなり再実行不能になるため、必ず最後に置く。再試行時に `auth.deleteUser` が `auth/user-not-found` を返した場合は、直前の実行で完了済みとみなし成功(`{ deleted: true }`)として扱う。データ削除の失敗は `HttpsError('internal', ..., { reason: 'ACCOUNT_DELETE_FAILED' })`(`reasonError` 経由)。
+
+**`devices` ドキュメントを削除せず占有解放のみに留める理由**(第7章「デバイス単位の無料枠管理」節との関係): `devices/{deviceId}` は「1端末の無料X枠は最初の1アカウントのみ」という乱用対策の器であり、`freeOwnerUid` が占有者を表す。アカウント削除時にドキュメントごと削除すると、同一端末で「無料枠を使い切る→退会→アカウントを作り直す→再び無料枠を得る」を際限なく繰り返せてしまい乱用対策そのものが無効化される。そのため `freeOwnerUid` のみを `null` にして「このuidとの紐付け」だけを解放し、ドキュメント自体は残す。第7章の未解決事項「機種変更・端末譲渡時の `devices/{deviceId}` 占有解除のサポート運用手順」は、アカウント削除という自己都合の操作による占有解放を認める根拠にはならないため、本実装によっても未解消のままとする(機種変更等の正当な事情への対応は引き続き別途のサポート運用(未確定)に委ねる)。
+
+`functions/src/account/accountDeleteTargets.ts` はAdmin SDK呼び出しを含まない純粋関数として分離されており、削除対象パスの組み立てを `node:test` で単体テスト可能にしている(`accountDeleteTargets.test.ts`)。
+
+**関数一覧(第5章backendセクションへの追補)**:
+
+| 関数名 | 種別 | 主な入力 | 主な出力 | 認証要件 |
+|---|---|---|---|---|
+| `accountDelete` | onCall | なし(UIDは `request.auth` から) | `{ deleted: true }` | Firebase Auth + App Check |
+
+**onCallエラーコード追加(第5章「onCallエラーコード一覧」への追補)**:
+
+| reason(HttpsError) | HttpsErrorコード | errorCode(Firestore保存) | 発生箇所 | UIの期待挙動 |
+|---|---|---|---|---|
+| `ACCOUNT_DELETE_FAILED`(新規) | `internal` | `account_delete_failed` | `accountDelete`(Firestore/Storage削除失敗またはAuthユーザー削除失敗) | ダイアログ内インライン表示。冪等設計のため同一操作で再試行可能 |
+
+既存の `firestore.rules`「`users/{uid}`: `allow delete: if false; // 退会処理はCloud Functions経由`」(データモデル・ストレージ・セキュリティルール設計章)は、Admin SDK(Cloud Functions)経由の削除がSecurity Rulesを経由しないことを前提とした既存記述であり、本実装と整合する(ルール変更不要)。
+
+---
+
+### deviceId/platform配線(第7章「デバイス単位の無料枠管理」節の実装)
+
+`lib/src/core/device/device_id_service.dart`(`DeviceIdService`、`deviceIdServiceProvider`(keepAlive、新規プロバイダー))が端末識別子を取得する:
+
+- iOS: `device_info_plus` の `IosDeviceInfo.identifierForVendor`
+- Android: `android_id` パッケージの `AndroidId.getId()`(`Settings.Secure.ANDROID_ID`)。`device_info_plus` の `AndroidDeviceInfo.id` は `Build.ID`(OSビルドID)であり端末固有値ではないため使用しない(第7章「端末識別子の取得」節の明記どおり)
+- 取得不可時(非対応プラットフォーム・プラグイン例外)は `null` を返す。フォールバック値は生成しない
+- 生の識別子をハッシュ化せずTLS上のonCallでそのまま送信する(サーバー側で `SHA-256(DEVICE_ID_PEPPER + rawId)` によりハッシュ化される設計のため)
+
+呼び出し元は `lib/src/features/posting/presentation/post_compose_screen.dart` の投稿確定処理(`_handleSubmit`)。Xターゲットが選択されている場合(`_xSelected`)にのみ `deviceIdService.getDeviceId()` / `getPlatform()` を呼び、`postComposeControllerProvider.submit` の `deviceId` / `platform` 引数として `snsPublishPost` まで伝搬する(Xターゲット未選択時はプラットフォームチャネル呼び出し自体を省略する)。
+
+**SMS未認証エラー時の投稿画面からの誘導**(S-07→S-09): `snsPublishPost` が `X_PHONE_VERIFICATION_REQUIRED`(第7章「onCallエラーコードの追加」表準拠)を返した場合、`post_compose_screen.dart` の `_showPhoneVerificationRequiredDialog()` が確認ダイアログ「電話番号認証が必要です」/「無料プランでXへ投稿するには電話番号認証が必要です。」+「設定へ」ボタンを表示し、`context.goNamed(AppRoute.snsAccounts.name)` でS-09へ遷移する。S-09に新設した「電話番号認証」行(本章前段)からそのまま認証を完了できる。
+
+---
+
+### App Checkクライアント初期化(第1章「Riverpod 3.0 プロバイダー設計」`appStartupProvider` への追補)
+
+`lib/src/features/startup/app_startup_provider.dart` の `appStartup` プロバイダーに、`Firebase.initializeApp` 直後・オンボーディングフラグ復元の前段として `FirebaseAppCheck.instance.activate()` 呼び出しを追加する(第7章「App Check の Functions 側 enforce」節: 全onCall関数が `enforceAppCheck: true` のため、これを行わないと本番でCallable Functionsが全滅する)。
+
+```dart
+await FirebaseAppCheck.instance.activate(
+  providerAndroid: kDebugMode
+      ? const AndroidDebugProvider()
+      : const AndroidPlayIntegrityProvider(),
+  providerApple: kDebugMode
+      ? const AppleDebugProvider()
+      : const AppleAppAttestWithDeviceCheckFallbackProvider(),
+);
+```
+
+- iOS本番 = `AppleAppAttestWithDeviceCheckFallbackProvider`(App Attest優先・非対応端末はDeviceCheckへ自動フォールバック。第7章「App Checkのアテステーションプロバイダ」節の規定どおり)
+- Android本番 = `AndroidPlayIntegrityProvider`(Play Integrity API)
+- デバッグ実行時(`kDebugMode`)はいずれもデバッグプロバイダを使用する
+
+**`activate()` 失敗時の扱い**: 例外はcatchして `AppLogger.error` でログ出力するのみに留め、アプリを起動不能にしない(App Check未有効化のままでも起動は継続する)。App Check未有効のまま以後のonCall呼び出しが `enforceAppCheck: true` により拒否される場合は、各Functions呼び出し側の既存エラーハンドリング(`ErrorMapper` 等)に委ねる。
+
+**RYO作業(コンソール側の登録。コードでは対応不可)**:
+
+1. Firebase Console > App Check で iOS/Androidアプリを登録する
+2. Android: Play Integrity APIをGoogle Play Consoleでプロジェクトに紐づけ、Play Integrityの利用を有効化する
+3. iOS: App Attest向けの追加設定はApple Developer側で不要(Firebase SDKが処理し、非対応端末はDeviceCheckへ自動フォールバック)
+4. デバッグ実行時は初回起動時にデバッグトークンがログ(Xcode/Logcat)に出力されるため、Firebase Console > App Check > Apps > デバッグトークンを管理 に登録する(実機・シミュレータ双方で個別に必要)
+
+---
+
+### プレミアムパターンのロックUI(第8章「プレミアムパターンのアクセス制御」第1層の実装)
+
+第8章第1層(クライアントUI)の実装。S-04(`camera/presentation/widgets/pattern_carousel.dart`)・S-06(`patterns/presentation/pattern_list_screen.dart`)のいずれも同一ロジック・同一挙動とする:
+
+```dart
+final isLocked = pattern.isPremium && currentPlan != Plan.pro; // currentPlanProvider(billing章定義)参照
+```
+
+- ロック中のタイル: 右下に錠アイコン(`CircleAvatar` + `Icons.lock`)バッジを表示。`Semantics` のアクセシビリティラベルは「`$label`、Proプラン限定」(既存「アクセシビリティ配慮」節の「選択状態を通知」パターンに準拠)
+- タップ時: パターンを適用せず、`context.pushNamed(AppRoute.plan.name, extra: pattern.id)` でペイウォール(S-10)へ `patternId` を `extra` として渡して遷移する(S-04/S-06で同一挙動)
+- S-06のプリセット「複製」メニューは、ロック中(非Proのプレミアムプリセット)では表示しない(第8章「S-06のプリセット『複製』メニューは…複製導線からのペイウォール誘導はしない」節どおり)
+
+**S-10側の訴求文脈**: `routing/app_router.dart` の `AppRoute.plan` ルートが `state.extra`(String?)を `PaywallScreen(patternId: ...)` へ渡す。`paywall_screen.dart` は `patternId` が解決できた場合(新規プロバイダー `patternByIdProvider` でパターン名を取得できた場合)のみ「『◯◯』はProプラン限定パターンです」の訴求行を表示し、未指定・解決失敗・読み込み中はいずれも従来表示のまま(訴求行を出さない)。`extra` を渡さない他の遷移元(S-07上限到達等)では `patternId` が `null` のままとなり、この訴求行は表示されない。
+
+---
+
+### S-08「よく使うパターン」タイル→S-04選択反映(第8章「成果ダッシュボード(S-08改訂)」の実装)
+
+`lib/src/features/history/domain/pattern_ranking_navigation.dart` が、タップされたパターンの状態(削除済み・プレミアム・解決失敗)に応じた遷移先を判定する純関数 `resolvePatternRankingTapAction` を提供する(BuildContext/refに依存しない設計。単体テスト可能):
+
+| 判定結果 | 条件 | 遷移 |
+|---|---|---|
+| `SelectPatternAndGoHome` | パターンが解決でき、かつ(プレミアムでない、またはPro加入中) | `selectedPatternProvider` にパターンを設定してS-04へ遷移(`context.goNamed(AppRoute.home.name)`) |
+| `NavigateToPaywall` | パターンがプレミアムかつ現在のプランがProでない | S-10へ `patternId` を `extra` で渡して遷移(前段のロックタイルタップと同一挙動) |
+| `GoHomeOnly` | パターンが削除済み等で解決できない | 何もせずS-04へ遷移 |
+
+呼び出し元は `lib/src/features/history/presentation/widgets/dashboard_summary.dart`(S-08サマリーセクションの「よく使うパターン」タイル)。
+
+---
+
+### AndroidManifest権限追加・エディタUI文言の日本語化
+
+- `android/app/src/main/AndroidManifest.xml`: 動画撮影対応(音声トラック収録)のため `android.permission.RECORD_AUDIO` を追加(既存の `android.permission.CAMERA` に追記。`camera` パッケージ公式README「Handling camera access permissions」準拠。第10章「メディア取り込み・動画対応」のアプリ内動画撮影機能に対応)
+- `lib/src/features/editor/presentation/adjust_editor_screen.dart`: `pro_image_editor` の `importStateHistoryMsg`(エディタ起動時の状態復元中インジケータ文言)を「エディタを準備しています...」に日本語化(既存「日本語UI文言の方針」節準拠)
+
+---
+
+### アーキテクチャへの追補(ディレクトリ・依存パッケージ・プロバイダー)
+
+#### ディレクトリ追加(Feature-First規約準拠)
+
+```
+lib/src/
+  core/device/
+    device_id_service.dart              # 新規: 端末識別子取得(iOS/Android)
+  features/auth/
+    domain/japan_phone_number_formatter.dart    # 新規: 日本国内表記⇔E.164変換
+    presentation/
+      account_deletion_dialog.dart      # 新規: アカウント削除の再認証ダイアログ
+      phone_verification_screen.dart    # 新規: 電話番号認証画面
+      phone_verification_controller.dart # 新規: verifyPhoneNumber/linkWithCredential実行
+      auth_field_validators.dart        # 既存(S-03用)に japanPhoneNumber/smsCode を追加
+  features/sns_accounts/presentation/
+    sns_accounts_screen.dart            # 既存: 「アカウント」セクション(_AccountSection)を追加
+```
+
+#### 依存パッケージ追加(pubspec.yaml)
+
+```yaml
+  # App Check(第7章「App Check の Functions 側 enforce」節)
+  firebase_app_check: ^0.4.5
+  # 端末識別(無料枠の乱用対策のデバイス単位管理用。第7章「デバイス単位の無料枠管理」節)
+  android_id: ^0.5.2
+  device_info_plus: ^13.2.0
+```
+
+#### Cloud Functions追加(functions/src)
+
+```
+functions/src/account/
+  accountDelete.ts              # onCall(アカウント削除本体)
+  accountDeleteTargets.ts       # 削除対象パス組み立て(純粋関数。node:testで単体テスト)
+  accountDeleteTargets.test.ts
+```
+
+#### プロバイダー追加(第1章の既存プロバイダー表への追記)
+
+| プロバイダー名 | 種別 | keepAlive | 責務 | 主な依存 |
+|---|---|---|---|---|
+| `deviceIdServiceProvider` | 関数 | ○ | `DeviceIdService` のDI(端末識別子取得) | - |
+| `linkedPhoneNumberProvider` | `@riverpod String?` | - | `FirebaseAuth.currentUser?.phoneNumber` の取得(S-09表示用。認証状態ストリームでは検知できないため呼び出し側が明示 `invalidate`) | `authRepositoryProvider` |
+| `patternByIdProvider` | `@riverpod Future<Pattern>`(family: patternId) | - | 単一パターンの取得(S-10ペイウォールの訴求文脈「『◯◯』はProプラン限定パターンです」のパターン名解決用) | `patternRepositoryProvider` |
+
+`phoneVerificationControllerProvider` は第7章「乱用対策」節のプロバイダー設計で既に定義済みのため本表への追加は不要(実装は本章「電話番号認証(SMS認証)」節参照)。
+
 ## 未解決事項
 
 ### アプリアーキテクチャ設計
@@ -4120,3 +4624,10 @@ Pro判定の参照は、billing担当定義の `billingStateProvider`(`users/{ui
 - Android 13+ の POST_NOTIFICATIONS ランタイム許可の実機挙動確認
 - 初回同時投稿保証の適用条件の厳密化要否(現設計はInstagram同時選択を必須にしない)
 - NEWバッジ表示閾値(仮置き14日)の確定
+
+### メディア取り込み・動画対応(追補設計)
+
+- X公式の動画解像度上限(32x32〜1280x1024)と実運用で想定する解像度(録画は`ResolutionPreset.hd`=720p/縦動画)の乖離。実機・実データでの確認が必要(本設計では録画解像度を720pに固定することでいったん回避している)
+- X動画付きポストの従量課金単価が画像付きポストと同一かの実測確認(backendセクション「コスト制御」の既存のX単価検証事項に統合して扱う)
+- Instagramのコンテナステータス確認(ポーリング)が`snsPublishPost`の実行時間予算内(`timeoutSeconds: 540`)に収まらない長尺動画の扱い。本設計はポーリング300秒で打ち切り、`media_publish`送信前の失敗として既存の返還規則に従いInstagramフェアユース予約分を返還する運用としたが、打ち切り後のユーザー体験(再試行導線)の最終確認が必要
+- `posts/{postId}.imagePath`(Freezed定義では必須)を`mediaType == 'video'`の投稿でどう扱うか(nullable化するか、型を維持したまま運用で未使用とするか)がdata担当との最終合意事項として未確定

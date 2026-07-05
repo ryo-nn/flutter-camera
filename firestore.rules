@@ -1,0 +1,205 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- 共通関数 ----------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // filterParamsはimagingセクション(pro_image_editorのtuneプリセット準拠)の
+    // 9パラメータ・値域と同一
+    function isValidFilterParams(p) {
+      return p.keys().hasOnly(
+          ['brightness', 'contrast', 'saturation', 'exposure', 'hue',
+           'temperature', 'tint', 'fade', 'smoothing'])
+        && p.brightness  is number && p.brightness  >= -0.5  && p.brightness  <= 0.5
+        && p.contrast    is number && p.contrast    >= -0.5  && p.contrast    <= 0.5
+        && p.saturation  is number && p.saturation  >= -0.5  && p.saturation  <= 0.5
+        && p.exposure    is number && p.exposure    >= -1.0  && p.exposure    <= 1.0
+        && p.hue         is number && p.hue         >= -0.25 && p.hue         <= 0.25
+        && p.temperature is number && p.temperature >= -0.5  && p.temperature <= 0.5
+        && p.tint        is number && p.tint        >= -0.5  && p.tint        <= 0.5
+        && p.fade        is number && p.fade        >= -1.0  && p.fade        <= 1.0
+        && p.smoothing   is number && p.smoothing   >=  0.0  && p.smoothing   <= 1.0;
+    }
+
+    // 注意: Rules言語はリスト要素の反復検証をサポートしないため、
+    // stampLayers各要素(assetId/cx/cy/widthRatio/rotation/flipX/flipY)の
+    // 構造検証は型・件数チェックにとどめ、要素の厳密検証は
+    // クライアント実装(書き込み時)とFreezedデシリアライズ(読み取り時)で担保する。
+    // 書き込めるのは本人のパターンのみのため影響範囲は本人に限定される。
+    //
+    // isPremium / publishedAt(リテンション追補)はクライアントが読み書きする
+    // フィールド一覧(hasOnly / affectedKeys().hasOnly)に含めない。これにより
+    // 新フィールドの追加自体がクライアント書き込み禁止の構造的な担保になる
+    // (プリセットはAdmin SDK投入のためRulesをバイパスして書き込める)。
+    function isValidPattern(data) {
+      return data.name is string
+        && data.name.size() >= 1 && data.name.size() <= 50
+        && data.filterParams is map
+        && isValidFilterParams(data.filterParams)
+        && (!('frameAssetId' in data)
+            || data.frameAssetId == null
+            || data.frameAssetId is string)
+        && data.stampLayers is list
+        && data.stampLayers.size() <= 10;
+    }
+
+    // ---------- users: 本人のみ ----------
+    match /users/{uid} {
+      allow get: if isOwner(uid);
+      allow list: if false;
+      allow create: if isOwner(uid)
+        && request.resource.data.keys().hasOnly(
+             ['uid', 'displayName', 'photoUrl', 'createdAt', 'updatedAt'])
+        && request.resource.data.uid == uid
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() >= 1
+        && request.resource.data.displayName.size() <= 30
+        && (request.resource.data.photoUrl == null
+            || request.resource.data.photoUrl is string)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+      allow update: if isOwner(uid)
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['displayName', 'photoUrl', 'updatedAt'])
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() >= 1
+        && request.resource.data.displayName.size() <= 30
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false; // 退会処理はCloud Functions経由
+
+      // SNS連携メタデータ: 読み取りのみ。書き込みはCloud Functions(Admin SDK)のみ
+      match /snsConnections/{provider} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
+
+      // ---------- billing: プラン状態・購入クレジット残高(課金追補) ----------
+      // users/{uid}/billing/state(plan / planExpiresAt / postCredits)。
+      // クライアントが自由に更新できる users 本体に課金状態を置くと偽装できて
+      // しまうため、書き込みはCloud Functions(webhook処理・snsPublishPostの
+      // クレジット消費/返還)のみに限定する。クライアントは読み取り専用
+      // (残数表示・プレミアムパターン判定・ペイウォールのプラン表示に使用)。
+      match /billing/{docId} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
+    }
+
+    // ---------- snsTokens: クライアントアクセス全面禁止 ----------
+    // 読み書きはCloud Functions(Admin SDK)のみ。暗号化方針はbackendセクション参照
+    match /snsTokens/{tokenId} {
+      allow read, write: if false;
+    }
+
+    // ---------- rcEvents: RevenueCat Webhookイベントの記録(課金追補) ----------
+    // 書き込みはCloud Functions(rcWebhook)のみ。クライアントアクセス全面禁止
+    match /rcEvents/{eventId} {
+      allow read, write: if false;
+    }
+
+    // ---------- creditGrants: 購入クレジット付与の冪等化台帳(課金追補) ----------
+    // ドキュメントID = {store}_{transactionId}。書き込みはCloud Functions
+    // (RevenueCat webhook/IAP検証処理)のみ。クライアントアクセス全面禁止
+    match /creditGrants/{grantId} {
+      allow read, write: if false;
+    }
+
+    // ---------- onboardingGrants: 初回同時投稿1回保証(リテンション追補) ----------
+    // ドキュメントID = uid。不存在 = 保証未消費(getはnot-foundで正常に返る)。
+    // 既存postUsageと同型のIDベース所有者判定
+    match /onboardingGrants/{uid} {
+      allow get: if isOwner(uid);
+      allow list: if false;
+      allow write: if false; // 消費(tx.create)・返還(削除)は snsPublishPost(Admin SDK)のみ
+    }
+
+    // ---------- devices: デバイス単位無料枠管理(枠制御追補) ----------
+    // クライアントアクセス全面禁止(読み書きともFunctionsのみ)。
+    // ドキュメントID = SHA-256(DEVICE_ID_PEPPER + 端末生ID)のhex表現
+    match /devices/{deviceId} {
+      allow read, write: if false;
+    }
+
+    // ---------- assets: 運営提供素材メタデータ。認証済み全員が読み取り可 ----------
+    match /assets/{assetId} {
+      allow read: if isSignedIn();
+      allow write: if false; // 投入は運営(Admin SDK / コンソール)のみ
+    }
+
+    // ---------- patterns: プリセットは全員読取、ユーザー作成は本人のみ ----------
+    match /patterns/{patternId} {
+      // list時はクエリに ownerType == 'preset' または ownerUid == 自UID の
+      // フィルタが必須(付けないクエリは拒否される)
+      allow read: if isSignedIn()
+        && (resource.data.ownerType == 'preset'
+            || resource.data.ownerUid == request.auth.uid);
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly(
+             ['ownerType', 'ownerUid', 'name', 'filterParams',
+              'frameAssetId', 'stampLayers', 'sortOrder',
+              'createdAt', 'updatedAt'])
+        && request.resource.data.ownerType == 'user'
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.sortOrder == 0
+        && isValidPattern(request.resource.data)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+      allow update: if isSignedIn()
+        && resource.data.ownerType == 'user'
+        && resource.data.ownerUid == request.auth.uid
+        // ownerType / ownerUid / sortOrder / createdAt の変更を禁止
+        // (isPremium / publishedAt もここに含めないため、ユーザー作成
+        // パターンでは常にクライアント書き込み不可のまま)
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['name', 'filterParams', 'frameAssetId',
+                       'stampLayers', 'updatedAt'])
+        && isValidPattern(request.resource.data)
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if isSignedIn()
+        && resource.data.ownerType == 'user'
+        && resource.data.ownerUid == request.auth.uid;
+    }
+
+    // ---------- posts: 本人の読み取りのみ。作成・更新はCloud Functionsのみ ----------
+    match /posts/{postId} {
+      // list時はクエリに userId == 自UID のフィルタが必須
+      allow read: if isSignedIn()
+        && resource.data.userId == request.auth.uid;
+      allow create, update, delete: if false;
+    }
+
+    // ---------- postUsage: 本人の読み取りのみ。書き込みはCloud Functionsのみ ----------
+    match /postUsage/{usageId} {
+      // ドキュメントIDは {uid}_{provider}_{periodKey} 形式(Firebase Authの標準
+      // プロバイダが発行するUIDは英数字のみで '_' を含まない)。
+      // resource.data を参照しないID前方一致判定にすることで、当該期間に未投稿で
+      // ドキュメントが存在しない場合も評価エラー(permission-denied)にならず、
+      // getはnot-found(snapshot.exists == false)として正常に返る。
+      // String.split はRules標準メソッド
+      // (出典: https://firebase.google.com/docs/reference/rules/rules.String)
+      allow get: if isSignedIn()
+        && usageId.split('_')[0] == request.auth.uid;
+      allow list: if false; // ドキュメントIDが決定的なためgetのみで足りる
+      allow write: if false;
+    }
+
+    // ---------- appConfig: 認証済み全員が読み取り可。書き込みは運営のみ ----------
+    match /appConfig/{docId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // ---------- デフォルト拒否 ----------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
