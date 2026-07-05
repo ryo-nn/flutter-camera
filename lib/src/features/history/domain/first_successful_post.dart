@@ -1,4 +1,5 @@
 import 'package:flutter_camera/src/features/posting/domain/post.dart';
+import 'package:flutter_camera/src/features/posting/domain/post_target_status.dart';
 
 /// この投稿が「成功」と判定できるかどうか(design.md 第9章「成果ダッシュボード
 /// (S-08改訂)」節の集計定義 = `MonthlyStats.fromPosts` が採用する

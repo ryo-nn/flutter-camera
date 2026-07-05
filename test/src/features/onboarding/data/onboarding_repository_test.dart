@@ -48,5 +48,33 @@ void main() {
       expect(await repository.isCompleted(), isTrue);
       expect(await repository.isFirstPostGuideSkipped(), isFalse);
     });
+
+    test('isFirstCompletionCelebrationShown は未設定時に false を返す', () async {
+      final repository = OnboardingRepository();
+
+      expect(await repository.isFirstCompletionCelebrationShown(), isFalse);
+    });
+
+    test(
+      'markFirstCompletionCelebrationShown 後は '
+      'isFirstCompletionCelebrationShown が true を返す',
+      () async {
+        final repository = OnboardingRepository();
+
+        await repository.markFirstCompletionCelebrationShown();
+
+        expect(await repository.isFirstCompletionCelebrationShown(), isTrue);
+      },
+    );
+
+    test('初回投稿完了演出の表示済みフラグは他の2つのフラグと独立したキーで管理される', () async {
+      final repository = OnboardingRepository();
+
+      await repository.markFirstCompletionCelebrationShown();
+
+      expect(await repository.isFirstCompletionCelebrationShown(), isTrue);
+      expect(await repository.isCompleted(), isFalse);
+      expect(await repository.isFirstPostGuideSkipped(), isFalse);
+    });
   });
 }

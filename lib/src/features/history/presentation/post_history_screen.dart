@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_camera/src/common_widgets/app_error_view.dart';
@@ -5,8 +7,10 @@ import 'package:flutter_camera/src/core/error/app_exception.dart';
 import 'package:flutter_camera/src/core/error/error_mapper.dart';
 import 'package:flutter_camera/src/core/firebase/firebase_providers.dart';
 import 'package:flutter_camera/src/features/history/data/firestore_post_history_repository.dart';
+import 'package:flutter_camera/src/features/history/presentation/first_completion_celebration_provider.dart';
 import 'package:flutter_camera/src/features/history/presentation/monthly_stats_provider.dart';
 import 'package:flutter_camera/src/features/history/presentation/widgets/dashboard_summary.dart';
+import 'package:flutter_camera/src/features/history/presentation/widgets/first_completion_celebration_widgets.dart';
 import 'package:flutter_camera/src/features/posting/domain/post.dart';
 import 'package:flutter_camera/src/features/posting/domain/post_target_status.dart';
 import 'package:flutter_camera/src/routing/app_route.dart';
@@ -21,6 +25,25 @@ class PostHistoryScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final historyAsync = ref.watch(postHistoryProvider);
+
+    // S-08 初回投稿完了直後の演出(design.md 第9章「3日トライアル導線の接続」節)。
+    // 完了カード・通知プレ許可ダイアログはステップ遷移のたびに一度だけ表示する
+    // (トライアルバナーはダイアログではなく `_HistoryBody` 内にインライン表示するため
+    // ここでは扱わない)。
+    ref.listen<FirstCompletionCelebrationStep?>(firstCompletionCelebrationProvider, (
+      previous,
+      next,
+    ) {
+      switch (next) {
+        case FirstCompletionCelebrationStep.completionCard:
+          unawaited(showFirstCompletionCard(context, ref));
+        case FirstCompletionCelebrationStep.notificationPermission:
+          unawaited(showNotificationPermissionDialog(context, ref));
+        case FirstCompletionCelebrationStep.trialBanner:
+        case null:
+          break;
+      }
+    });
 
     return Scaffold(
       appBar: AppBar(title: const Text('投稿履歴')),
@@ -85,13 +108,23 @@ class _HistoryBody extends ConsumerWidget {
     }
 
     final statsAsync = ref.watch(monthlyStatsProvider);
+    // S-08 初回投稿完了直後の演出(design.md 第9章「3日トライアル導線の接続」節)の
+    // 最終ステップ。ダイアログではなくダッシュボード上部にインライン表示する。
+    final showTrialBanner =
+        ref.watch(firstCompletionCelebrationProvider) ==
+        FirstCompletionCelebrationStep.trialBanner;
+    final leadingCount = showTrialBanner ? 2 : 1;
+    final statsIndex = showTrialBanner ? 1 : 0;
 
     return RefreshIndicator(
       onRefresh: () async => ref.invalidate(postHistoryProvider),
       child: ListView.builder(
-        itemCount: posts.length + 1,
+        itemCount: posts.length + leadingCount,
         itemBuilder: (context, index) {
-          if (index == 0) {
+          if (showTrialBanner && index == 0) {
+            return const TrialBanner();
+          }
+          if (index == statsIndex) {
             return statsAsync.when(
               data: (stats) => DashboardSummary(stats: stats),
               loading: () => const SizedBox(
@@ -101,7 +134,7 @@ class _HistoryBody extends ConsumerWidget {
               error: (error, stackTrace) => const SizedBox.shrink(),
             );
           }
-          final post = posts[index - 1];
+          final post = posts[index - leadingCount];
           return _PostHistoryTile(
             post: post,
             onTap: () => _showDetail(context, post),

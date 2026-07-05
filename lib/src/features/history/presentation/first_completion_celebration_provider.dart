@@ -44,7 +44,15 @@ class FirstCompletionCelebration extends _$FirstCompletionCelebration {
       return;
     }
 
-    final posts = await ref.read(postHistoryProvider.future);
+    // `postHistoryProvider`(autoDispose)を経由せず、
+    // `onboarding/presentation/first_post_guide_provider.dart` の
+    // `FirstPostGuide._evaluate()` と同様にリポジトリを直接読む(本provider自身も
+    // autoDisposeのため、他providerの `.future` を `ref.read` するとキャッシュされずに
+    // 破棄される可能性がある。購読は初回の1件取得後に自動的に閉じる)。
+    final posts = await ref
+        .read(postHistoryRepositoryProvider)
+        .watchPostHistory()
+        .first;
     if (!isFirstSuccessfulPost(posts)) return;
 
     state = FirstCompletionCelebrationStep.completionCard;
