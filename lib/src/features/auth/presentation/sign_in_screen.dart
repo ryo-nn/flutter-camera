@@ -26,6 +26,8 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _emailFocusNode = FocusNode();
+  final _passwordFocusNode = FocusNode();
 
   _AuthMode _mode = _AuthMode.signIn;
   bool _obscurePassword = true;
@@ -34,7 +36,22 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
+    _emailFocusNode.dispose();
+    _passwordFocusNode.dispose();
     super.dispose();
+  }
+
+  /// design.md 画面設計・UIフロー章「アクセシビリティ配慮」:
+  /// 「エラー発生時は先頭のエラーフィールドへフォーカス移動する」準拠。
+  /// 視覚順(メールアドレス→パスワード)と同じ順で最初にエラーのある
+  /// フィールドへフォーカスする。
+  void _focusFirstInvalidField() {
+    if (AuthFieldValidators.email(_emailController.text) != null) {
+      _emailFocusNode.requestFocus();
+    } else if (AuthFieldValidators.password(_passwordController.text) !=
+        null) {
+      _passwordFocusNode.requestFocus();
+    }
   }
 
   void _switchMode(_AuthMode mode) {
@@ -45,7 +62,10 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
   }
 
   Future<void> _submit() async {
-    if (!(_formKey.currentState?.validate() ?? false)) return;
+    if (!(_formKey.currentState?.validate() ?? false)) {
+      _focusFirstInvalidField();
+      return;
+    }
     final email = _emailController.text.trim();
     final password = _passwordController.text;
     final controller = ref.read(signInControllerProvider.notifier);
@@ -106,6 +126,7 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                     const SizedBox(height: 24),
                     TextFormField(
                       controller: _emailController,
+                      focusNode: _emailFocusNode,
                       enabled: !isSubmitting,
                       keyboardType: TextInputType.emailAddress,
                       autofillHints: const [AutofillHints.email],
@@ -116,6 +137,7 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                     const SizedBox(height: 16),
                     TextFormField(
                       controller: _passwordController,
+                      focusNode: _passwordFocusNode,
                       enabled: !isSubmitting,
                       obscureText: _obscurePassword,
                       autofillHints: [

@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_camera/src/common_widgets/app_error_view.dart';
-import 'package:flutter_camera/src/core/error/app_exception.dart';
 import 'package:flutter_camera/src/core/error/error_mapper.dart';
 import 'package:flutter_camera/src/core/firebase/firebase_providers.dart';
 import 'package:flutter_camera/src/features/history/data/firestore_post_history_repository.dart';
@@ -12,6 +11,7 @@ import 'package:flutter_camera/src/features/history/presentation/monthly_stats_p
 import 'package:flutter_camera/src/features/history/presentation/widgets/dashboard_summary.dart';
 import 'package:flutter_camera/src/features/history/presentation/widgets/first_completion_celebration_widgets.dart';
 import 'package:flutter_camera/src/features/posting/domain/post.dart';
+import 'package:flutter_camera/src/features/posting/domain/post_target_failure_reason.dart';
 import 'package:flutter_camera/src/features/posting/domain/post_target_status.dart';
 import 'package:flutter_camera/src/routing/app_route.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -207,7 +207,7 @@ class _StatusChip extends StatelessWidget {
       label:
           target.status == PostTargetStatus.failed &&
               target.errorMessage != null
-          ? '$label、投稿失敗、${_failureReason(target)}'
+          ? '$label、投稿失敗、${postTargetFailureReason(target)}'
           : '$label、$text',
       excludeSemantics: true,
       child: Chip(
@@ -335,7 +335,7 @@ class _DetailTargetRow extends StatelessWidget {
           ),
           if (isFailed) ...[
             const SizedBox(height: 4),
-            Text(_failureReason(target)),
+            Text(postTargetFailureReason(target)),
             if (target.errorCode == 'ig_not_professional') ...[
               const SizedBox(height: 4),
               TextButton(
@@ -358,21 +358,4 @@ String _formatDate(DateTime dateTime) {
   final hour = local.hour.toString().padLeft(2, '0');
   final minute = local.minute.toString().padLeft(2, '0');
   return '${local.month}月${local.day}日 $hour:$minute';
-}
-
-/// backend章「onCallエラーコード一覧」+ quota/retention章追加分の `errorCode` を
-/// `ErrorMapper` 経由で日本語文言化する(UI章「エラー文言は必ずerror_mapperで一元化」
-/// 方針準拠。Firestoreの生 `errorMessage` は開発者向けログ用のため画面には出さない)。
-String _failureReason(PostTarget target) {
-  if (target.errorCode == null) {
-    return '投稿に失敗しました。時間をおいて再度お試しください。';
-  }
-  return ErrorMapper.toUserMessage(
-        SnsPostException(
-          target.errorMessage ?? '',
-          provider: target.provider,
-          apiErrorCode: target.errorCode,
-        ),
-      ) ??
-      '投稿に失敗しました。時間をおいて再度お試しください。';
 }

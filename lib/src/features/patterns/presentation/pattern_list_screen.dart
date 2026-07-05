@@ -363,6 +363,7 @@ class _PatternTile extends StatelessWidget {
                         top: -4,
                         child: PopupMenuButton<void>(
                           icon: const Icon(Icons.more_vert),
+                          tooltip: 'その他の操作',
                           itemBuilder: (context) => menuItems,
                         ),
                       ),

@@ -74,6 +74,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
         title: const Text('プランとお支払い'),
         leading: IconButton(
           icon: const Icon(Icons.close),
+          tooltip: '閉じる',
           onPressed: () {
             if (context.canPop()) context.pop();
           },

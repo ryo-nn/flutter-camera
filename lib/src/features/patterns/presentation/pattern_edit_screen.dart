@@ -35,6 +35,7 @@ class PatternEditScreen extends ConsumerStatefulWidget {
 class _PatternEditScreenState extends ConsumerState<PatternEditScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
+  final _nameFocusNode = FocusNode();
 
   FilterParams _filterParams = const FilterParams();
   String? _frameAssetId;
@@ -66,6 +67,7 @@ class _PatternEditScreenState extends ConsumerState<PatternEditScreen> {
   @override
   void dispose() {
     _nameController.dispose();
+    _nameFocusNode.dispose();
     super.dispose();
   }
 
@@ -90,7 +92,12 @@ class _PatternEditScreenState extends ConsumerState<PatternEditScreen> {
   }
 
   Future<void> _handleSave() async {
-    if (!(_formKey.currentState?.validate() ?? false)) return;
+    // design.md 画面設計・UIフロー章「アクセシビリティ配慮」:
+    // 「エラー発生時は先頭のエラーフィールドへフォーカス移動する」準拠。
+    if (!(_formKey.currentState?.validate() ?? false)) {
+      _nameFocusNode.requestFocus();
+      return;
+    }
 
     final controller = ref.read(
       patternEditControllerProvider(widget.patternId).notifier,
@@ -186,6 +193,7 @@ class _PatternEditScreenState extends ConsumerState<PatternEditScreen> {
           title: Text(widget.patternId == null ? 'パターンを作る' : 'パターンを編集'),
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
+            tooltip: '戻る',
             onPressed: _handleBack,
           ),
         ),
@@ -227,6 +235,7 @@ class _PatternEditScreenState extends ConsumerState<PatternEditScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: TextFormField(
                     controller: _nameController,
+                    focusNode: _nameFocusNode,
                     maxLength: PatternNameLimits.maxLength,
                     decoration: const InputDecoration(labelText: 'パターン名'),
                     validator: patternNameValidationError,

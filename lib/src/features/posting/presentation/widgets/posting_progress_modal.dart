@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_camera/src/core/models/sns_provider.dart';
 import 'package:flutter_camera/src/features/posting/data/functions_post_repository.dart';
 import 'package:flutter_camera/src/features/posting/domain/post.dart';
+import 'package:flutter_camera/src/features/posting/domain/post_target_failure_reason.dart';
 import 'package:flutter_camera/src/features/posting/domain/post_target_status.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -116,12 +117,23 @@ class _TargetProgressRow extends StatelessWidget {
       ),
       _ => (Icons.hourglass_empty, Colors.grey, '$labelへの投稿を待機中…'),
     };
-    return Row(
-      children: [
-        Icon(icon, color: color),
-        const SizedBox(width: 8),
-        Expanded(child: Text(text)),
-      ],
+    // design.md 画面設計・UIフロー章「アクセシビリティ配慮」: S-07のステータス行は
+    // 「X、投稿失敗、本日の投稿上限に達しました」のように結果と理由を読み上げ可能にする
+    // (S-08のステータスチップと同じ `postTargetFailureReason` を用いた文言統一)。
+    final semanticsLabel =
+        target.status == PostTargetStatus.failed && target.errorMessage != null
+        ? '$label、投稿失敗、${postTargetFailureReason(target)}'
+        : text;
+    return Semantics(
+      label: semanticsLabel,
+      excludeSemantics: true,
+      child: Row(
+        children: [
+          Icon(icon, color: color),
+          const SizedBox(width: 8),
+          Expanded(child: Text(text)),
+        ],
+      ),
     );
   }
 }
