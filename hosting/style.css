@@ -1,0 +1,137 @@
+:root {
+  color-scheme: light dark;
+  --fg: #1a1a1a;
+  --bg: #ffffff;
+  --muted: #666666;
+  --border: #dddddd;
+  --accent: #b3261e;
+  --todo-bg: #fff3cd;
+  --todo-fg: #7a5b00;
+  --notice-border: #e0c060;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #e6e6e6;
+    --bg: #14161a;
+    --muted: #a0a0a0;
+    --border: #3a3d42;
+    --accent: #ff8a80;
+    --todo-bg: #4a3b00;
+    --todo-fg: #ffdd80;
+    --notice-border: #7a6220;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 2.5rem 1.25rem 4rem;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN",
+    "Yu Gothic", Meiryo, sans-serif;
+  line-height: 1.9;
+}
+
+.page {
+  max-width: 780px;
+  margin: 0 auto;
+}
+
+h1 {
+  font-size: 1.6rem;
+  margin-bottom: 0.25rem;
+}
+
+h2 {
+  font-size: 1.15rem;
+  margin-top: 2.25rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.4rem;
+}
+
+h3 {
+  font-size: 1rem;
+  margin-top: 1.5rem;
+}
+
+p,
+li {
+  font-size: 0.95rem;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0;
+  font-size: 0.88rem;
+}
+
+th,
+td {
+  border: 1px solid var(--border);
+  padding: 0.5rem 0.6rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  background: rgba(127, 127, 127, 0.08);
+}
+
+.notice {
+  background: var(--todo-bg);
+  color: var(--todo-fg);
+  border: 1px solid var(--notice-border);
+  border-radius: 6px;
+  padding: 1rem 1.2rem;
+  font-size: 0.85rem;
+  margin-bottom: 2rem;
+}
+
+.notice p {
+  margin: 0.3rem 0;
+}
+
+mark.todo {
+  background: var(--todo-bg);
+  color: var(--todo-fg);
+  padding: 0 0.25rem;
+  border-radius: 3px;
+  font-weight: 600;
+}
+
+.meta {
+  margin-top: 3rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+nav.crumbs {
+  font-size: 0.85rem;
+  margin-bottom: 1.5rem;
+}
+
+nav.crumbs a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+nav.crumbs a:hover {
+  text-decoration: underline;
+}
+
+@media print {
+  body {
+    padding: 0;
+  }
+  .notice {
+    display: none;
+  }
+}

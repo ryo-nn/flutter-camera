@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Flutter Camera | 自撮り × パターン加工 × SNS一括投稿</title>
+<meta name="description" content="自撮り撮影からパターン加工、Instagram・Xへの一括投稿までを1つのアプリで。ナノ・マイクロインフルエンサーのためのセルフブランディング投稿インフラ「Flutter Camera」。" />
+<link rel="icon" href="icon.png" />
+<style>
+:root {
+  --violet: #8f5cf6;
+  --pink: #fe7bad;
+  --yellow: #ffe066;
+  --cream: #fbf6fd;
+  --ink: #241b36;
+  --ink-soft: #5c5270;
+  --card-bg: #ffffff;
+  --page-bg: #fbf6fd;
+  --border: rgba(36, 27, 54, 0.08);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #f3effa;
+    --ink-soft: #c7bfd9;
+    --card-bg: #241b36;
+    --page-bg: #171022;
+    --border: rgba(255, 255, 255, 0.08);
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--page-bg);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN",
+    "Yu Gothic", Meiryo, sans-serif;
+  line-height: 1.8;
+}
+a { color: inherit; }
+.hero {
+  background: linear-gradient(135deg, var(--violet) 0%, var(--pink) 100%);
+  color: #fff;
+  padding: 4.5rem 1.5rem 5rem;
+  text-align: center;
+}
+.hero img {
+  width: 96px;
+  height: 96px;
+  border-radius: 24px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  margin-bottom: 1.5rem;
+}
+.hero h1 {
+  font-size: 1.9rem;
+  margin: 0 0 0.75rem;
+  letter-spacing: 0.02em;
+}
+.hero p.lead {
+  font-size: 1.05rem;
+  max-width: 30rem;
+  margin: 0 auto;
+  opacity: 0.95;
+}
+.hero .badge {
+  display: inline-block;
+  margin-top: 1.75rem;
+  padding: 0.6rem 1.4rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  font-size: 0.85rem;
+}
+main {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 5rem;
+}
+section {
+  margin-bottom: 4rem;
+}
+h2 {
+  font-size: 1.4rem;
+  text-align: center;
+  margin-bottom: 2rem;
+}
+.features {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1.25rem;
+}
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 1.5rem;
+}
+.card .mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--violet), var(--pink));
+  color: #fff;
+  font-size: 1.1rem;
+  margin-bottom: 0.9rem;
+}
+.card h3 {
+  font-size: 1rem;
+  margin: 0 0 0.5rem;
+}
+.card p {
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+  margin: 0;
+}
+.audience {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 2rem;
+  text-align: center;
+}
+.audience p {
+  font-size: 0.95rem;
+  color: var(--ink-soft);
+  max-width: 34rem;
+  margin: 0 auto;
+}
+.pricing {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1.25rem;
+}
+.plan {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 1.75rem;
+  text-align: center;
+}
+.plan.highlight {
+  border: 2px solid var(--violet);
+  position: relative;
+}
+.plan .name {
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--ink-soft);
+}
+.plan .price {
+  font-size: 1.7rem;
+  font-weight: 700;
+  margin: 0.4rem 0 0.8rem;
+}
+.plan .price span {
+  font-size: 0.85rem;
+  font-weight: 400;
+  color: var(--ink-soft);
+}
+.plan ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  text-align: left;
+}
+.plan li {
+  padding: 0.35rem 0;
+  border-top: 1px solid var(--border);
+}
+.plan li:first-child { border-top: none; }
+.note {
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  margin-top: 1.5rem;
+}
+.cta {
+  text-align: center;
+  padding: 2.5rem 1.5rem;
+  border-radius: 20px;
+  background: linear-gradient(135deg, var(--violet), var(--pink));
+  color: #fff;
+}
+.cta h2 { color: #fff; }
+.cta .store-badges {
+  font-size: 0.9rem;
+  opacity: 0.9;
+  margin-top: 0.5rem;
+}
+footer {
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  padding: 2rem 1.5rem 3rem;
+  border-top: 1px solid var(--border);
+}
+footer nav {
+  margin-bottom: 0.75rem;
+}
+footer nav a {
+  margin: 0 0.6rem;
+  text-decoration: none;
+  color: var(--ink-soft);
+}
+footer nav a:hover {
+  text-decoration: underline;
+}
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <img src="icon.png" alt="Flutter Camera アイコン" />
+  <h1>Flutter Camera</h1>
+  <p class="lead">自撮り撮影 → お気に入りの「パターン」で自動加工 → Instagram・Xへワンタップ一括投稿。</p>
+  <span class="badge">近日公開予定</span>
+</div>
+
+<main>
+
+<section>
+  <h2>できること</h2>
+  <div class="features">
+    <div class="card">
+      <div class="mark">📷</div>
+      <h3>自撮り撮影・取り込み</h3>
+      <p>フロントカメラでの撮影はもちろん、フォトライブラリの写真・動画もそのまま取り込めます。</p>
+    </div>
+    <div class="card">
+      <div class="mark">✨</div>
+      <h3>パターンで自動加工</h3>
+      <p>フィルター・フレーム・スタンプをまとめた「パターン」を登録しておけば、毎回同じ仕上がりをワンタップで再現。プリセットも複数同梱。</p>
+    </div>
+    <div class="card">
+      <div class="mark">🔗</div>
+      <h3>Instagram・Xへ一括投稿</h3>
+      <p>加工が終わったら、そのままInstagram(プロアカウント)とXへまとめて投稿。SNSごとに個別操作する手間をなくします。</p>
+    </div>
+  </div>
+</section>
+
+<section class="audience">
+  <h2>こんな方に</h2>
+  <p>美容・コスメ・ファッション系で発信するナノ〜マイクロインフルエンサーの方向けに、投稿の「撮る→加工する→出す」までを最短化するために設計しています。</p>
+</section>
+
+<section>
+  <h2>料金プラン</h2>
+  <div class="pricing">
+    <div class="plan">
+      <div class="name">無料プラン</div>
+      <div class="price">¥0</div>
+      <ul>
+        <li>Instagram投稿 実質無制限</li>
+        <li>X投稿 月2〜3回</li>
+      </ul>
+    </div>
+    <div class="plan highlight">
+      <div class="name">Lightプラン</div>
+      <div class="price">¥480 <span>/月</span></div>
+      <ul>
+        <li>Instagram投稿 実質無制限</li>
+        <li>X投稿 月30回</li>
+      </ul>
+    </div>
+    <div class="plan">
+      <div class="name">Proプラン</div>
+      <div class="price">¥980 <span>/月</span></div>
+      <ul>
+        <li>Instagram投稿 実質無制限</li>
+        <li>X投稿 月150回</li>
+        <li>プレミアムパターン利用可</li>
+        <li>3日間無料トライアルあり</li>
+      </ul>
+    </div>
+  </div>
+  <p class="note">X投稿枠を使い切った場合は、追加の投稿クレジット(10回 ¥200・無期限)を購入できます。価格は税込表示等を含め変更となる場合があります。</p>
+</section>
+
+<section class="cta">
+  <h2>近日公開予定</h2>
+  <p>App Store / Google Play での提供に向けて準備中です。</p>
+</section>
+
+</main>
+
+<footer>
+  <nav>
+    <a href="terms-of-service.html">利用規約</a>
+    <a href="privacy-policy.html">プライバシーポリシー</a>
+    <a href="tokushoho.html">特定商取引法に基づく表記</a>
+  </nav>
+  <div>&copy; 合同会社N.N.</div>
+</footer>
+
+</body>
+</html>
